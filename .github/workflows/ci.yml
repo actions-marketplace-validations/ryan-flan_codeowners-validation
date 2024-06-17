@@ -30,7 +30,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.1.7
       - uses: ./
         name: Run dtolnay/rust-toolchain${{contains(matrix.rust, ' ') && ' for ' || '@'}}${{matrix.rust}}
         id: toolchain

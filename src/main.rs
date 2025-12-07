@@ -1,29 +1,50 @@
+use clap::Parser;
 use codeowners_validation::parser::parse_codeowners_file;
-use codeowners_validation::validators::check_exists::validate_directory;
-use std::io;
-use std::path::Path;
+use codeowners_validation::validators::validator::{run_validator, ValidatorArgs};
+use std::{io, path::Path};
+
+#[derive(Parser, Debug)]
+#[command(name = "codeowners-validation")]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Comma-separated list of checks: exists, duplicate_patterns
+    #[arg(long, env = "INPUT_CHECKS", default_value = "all")]
+    checks: String,
+
+    /// Path to CODEOWNERS file
+    #[arg(long, default_value = ".github/CODEOWNERS")]
+    path: String,
+}
 
 fn main() -> io::Result<()> {
-    let codeowners_file_path = ".github/CODEOWNERS";
-    let repo_dir = Path::new(".");
+    let cli = Cli::parse();
 
-    // Parse the CODEOWNERS file
-    let (rules, invalid_lines) = match parse_codeowners_file(codeowners_file_path) {
+    let validator_args = ValidatorArgs::from_env(&cli.checks);
+    let path = Path::new(&cli.path);
+
+    if !path.exists() {
+        eprintln!("❌ CODEOWNERS file not found at {:?}", path);
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("CODEOWNERS file not found at {:?}", path),
+        ));
+    }
+
+    let (rules, invalid_lines) = match parse_codeowners_file(&cli.path) {
         Ok((rules, invalid_lines)) => (rules, invalid_lines),
         Err(e) => {
-            eprintln!("Error parsing CODEOWNERS file: {}", e);
-            return Err(e);
+            eprintln!("❌ Error parsing CODEOWNERS file: {}", e);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to parse CODEOWNERS file: {}", e),
+            ));
         }
     };
 
-    // Check for invalid lines in the CODEOWNERS file
     if !invalid_lines.is_empty() {
-        eprintln!("Invalid lines found in the CODEOWNERS file:");
-        for invalid_line in invalid_lines {
-            eprintln!(
-                "Line {}: {}",
-                invalid_line.line_number, invalid_line.content
-            );
+        eprintln!("⚠️  Invalid lines found:");
+        for line in invalid_lines {
+            eprintln!(" - Line {}: {}", line.line_number, line.content);
         }
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -31,36 +52,21 @@ fn main() -> io::Result<()> {
         ));
     }
 
-    let results = match validate_directory(repo_dir, rules) {
-        Ok(results) => results,
-        Err(e) => {
-            eprintln!("Error validating directory: {}", e);
-            return Err(io::Error::new(io::ErrorKind::Other, e.to_string()));
-        }
-    };
+    let failed_rules = run_validator(&validator_args, &rules);
 
-    // Check if any files failed the validation
-    let mut failed_files = Vec::new();
-    for (pattern, result) in results {
-        if !result.matched {
-            failed_files.push((pattern, result.original_path, result.owners));
+    if !failed_rules.is_empty() {
+        eprintln!("❌ The following rules failed:\n");
+        for (validator, rule) in &failed_rules {
+            eprintln!("Validator: {}", validator);
+            eprintln!("  Pattern: {}", rule.pattern);
+            eprintln!("    Rule: {}", rule.original_path);
+            eprintln!("    Owners: {:?}", rule.owners);
+            eprintln!();
         }
+
+        return Err(io::Error::other("Some rules failed validation"));
     }
 
-    // If there are failed files, print them nicely to stdout
-    if !failed_files.is_empty() {
-        println!("The following files failed the check_exists validation:");
-        for (pattern, original_path, owners) in failed_files {
-            println!("  Pattern: {}", pattern);
-            println!("    Rule: {}", original_path);
-            println!("    Owners: {:?}", owners);
-            println!();
-        }
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Some files failed the check_exists validation",
-        ));
-    }
-
+    println!("✅ CODEOWNERS validation passed.");
     Ok(())
 }

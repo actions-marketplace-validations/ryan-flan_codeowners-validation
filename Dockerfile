@@ -1,9 +1,11 @@
-# Build stage
-FROM rust:latest as builder
-WORKDIR /usr/src/codeowners-validation
-COPY . .
-RUN cargo build --release
+FROM rust:1-slim
 
-FROM debian:bookworm-slim
-COPY --from=builder /usr/src/codeowners-validation/target/release/codeowners-validation /usr/local/bin/codeowners-validation
-CMD ["codeowners-validation"]
+RUN cargo install --locked codeowners-validation
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /github/workspace
+
+ENTRYPOINT ["/entrypoint.sh"]
+
